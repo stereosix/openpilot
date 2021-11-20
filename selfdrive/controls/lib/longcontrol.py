@@ -88,8 +88,16 @@ class LongControl():
     # TODO: This check is not complete and needs to be enforced by MPC
     a_target = clip(a_target, ACCEL_MIN_ISO, ACCEL_MAX_ISO)
 
-    self.pid.neg_limit = accel_limits[0]
-    self.pid.pos_limit = accel_limits[1]
+    # coasting in cruise
+    if long_plan.source in ['cruiseCoast', 'cruiseGas']:
+      self.pid.neg_limit = 0
+    else:
+      self.pid.neg_limit = accel_limits[0]
+
+    if long_plan.source in ['cruiseCoast', 'cruiseBrake']:
+      self.pid.pos_limit = 0
+    else:
+      self.pid.pos_limit = accel_limits[1]
 
     # Update state machine
     output_accel = self.last_output_accel

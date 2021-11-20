@@ -15,7 +15,7 @@ LONG_MPC_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPORT_DIR = os.path.join(LONG_MPC_DIR, "c_generated_code")
 JSON_FILE = "acados_ocp_long.json"
 
-SOURCES = ['lead0', 'lead1', 'cruise']
+SOURCES = ['lead0', 'lead1', 'cruiseGas', 'cruiseCoast', 'cruiseBrake']
 
 X_DIM = 3
 U_DIM = 1
@@ -44,6 +44,7 @@ T_DIFFS = np.diff(T_IDXS, prepend=[0.])
 MIN_ACCEL = -3.5
 T_REACT = 1.8
 MAX_BRAKE = 9.81
+COAST_LIMIT = 2.78  # 10 km/h
 
 
 def get_stopped_equivalence_factor(v_lead):
@@ -303,14 +304,29 @@ class LongitudinalMpc():
 
     # Fake an obstacle for cruise, this ensures smooth acceleration to set speed
     # when the leads are no factor.
+
+    # Never target vEgo, but use it to target gas.
+    # min(lead, brake, max(vEgo, gas))
+
     cruise_lower_bound = v_ego + (3/4) * self.cruise_min_a * T_IDXS
     cruise_upper_bound = v_ego + (3/4) * self.cruise_max_a * T_IDXS
-    v_cruise_clipped = np.clip(v_cruise * np.ones(N+1),
-                               cruise_lower_bound,
-                               cruise_upper_bound)
-    cruise_obstacle = T_IDXS*v_cruise_clipped + get_safe_obstacle_distance(v_cruise_clipped)
+    v_gas_clipped = np.clip(v_cruise * np.ones(N+1),
+                              cruise_lower_bound,
+                              cruise_upper_bound)
+    v_brake_clipped = np.clip((v_cruise + COAST_LIMIT) * np.ones(N+1),
+                              cruise_lower_bound,
+                              cruise_upper_bound)
+    gas_obstacle = T_IDXS*v_gas_clipped + get_safe_obstacle_distance(v_gas_clipped)
+    coast_obstacle = T_IDXS*v_ego + get_safe_obstacle_distance(v_ego)
+    brake_obstacle = T_IDXS*v_brake_clipped + get_safe_obstacle_distance(v_brake_clipped)
 
-    x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle])
+    # max(vEgo, gas)
+    if v_ego > v_gas_clipped[0]:
+      gas_obstacle = coast_obstacle + 1 # no gas
+    else:
+      coast_obstacle = gas_obstacle + 1 # no coast
+
+    x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, gas_obstacle, coast_obstacle, brake_obstacle])
     self.source = SOURCES[np.argmin(x_obstacles[0])]
     self.params[:,2] = np.min(x_obstacles, axis=1)
 
